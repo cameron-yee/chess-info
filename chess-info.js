@@ -27,6 +27,21 @@ async function fetchGamesByYear(username, year) {
   }
 }
 
+function getOpening(game) {
+  const openingUrl = game.eco
+  const openingUrlParts = openingUrl.split('/')
+  const opening = openingUrlParts[openingUrlParts.length - 1]
+  return opening
+}
+
+function getGameResult(username, game) {
+  return game.white.username === username
+    ? game.white.result
+    : game.black.username === username
+      ? game.black.result
+      : ''
+}
+
 async function getOpeningsByYear(username, year, pieces, timeClass) {
   try {
     const allGames = await fetchGamesByYear(username, year)
@@ -45,10 +60,13 @@ async function getOpeningsByYear(username, year, pieces, timeClass) {
       })
 
     const openings = filteredGames.map((game) => {
-      const openingUrl = game.eco
-      const openingUrlParts = openingUrl.split('/')
-      const opening = openingUrlParts[openingUrlParts.length - 1]
-      return opening
+      const opening = getOpening(game)
+      const result = getGameResult(username, game)
+
+      return {
+        opening,
+        result
+      }
     })
 
     return openings
@@ -58,20 +76,23 @@ async function getOpeningsByYear(username, year, pieces, timeClass) {
   }
 }
 
-function sortByValues(obj) {
+function sortOpeningCounts(openingCounts) {
   return Object.fromEntries(
-    Object.entries(obj).sort(([,a],[,b]) => b-a)
+    Object.entries(openingCounts).sort(([,a],[,b]) => b.count-a.count)
   )
 }
 
 function getOpeningCounts(openings) {
-  return sortByValues(openings.reduce((acc, curr) => {
-    if (acc[curr]) {
-      acc[curr]++
+  return sortOpeningCounts(openings.reduce((acc, { opening, result }) => {
+    if (acc[opening]) {
+      acc[opening].count++
+      acc[opening][result] = acc[opening][result] ? acc[opening][result] + 1 : 1
       return acc
     }
 
-    acc[curr] = 1
+    acc[opening] = {}
+    acc[opening].count = 1
+    acc[opening][result] = 1
     return acc
   }, {}))
 }
