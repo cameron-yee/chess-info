@@ -1,7 +1,8 @@
-const { isUserBlack, isUserWhite } = require('./filter')
+import type { IGame, GameResult, IPGN } from './types'
+import { isUserBlack, isUserWhite } from './filter'
 
-function parsePGN(pgn) {
-  let pgnJSON = {
+function parsePGN(pgn: string): IPGN {
+  let pgnJSON: IPGN = {
     tags: {},
     moves: ''
   }
@@ -25,14 +26,14 @@ function parsePGN(pgn) {
   return pgnJSON
 }
 
-function getOpening(game) {
+export function getOpening(game: IGame): string {
   const pgn = parsePGN(game.pgn)
   const openingUrlParts = pgn.tags.ECOUrl?.split('/')
   const opening = openingUrlParts?.[openingUrlParts?.length - 1]
   return opening
 }
 
-function getGameResult(username, game) {
+export function getGameResult(username: string, game: IGame): GameResult {
   if (isUserWhite(username, game)) {
     return game.white.result
   }
@@ -43,7 +44,7 @@ function getGameResult(username, game) {
   return ''
 }
 
-function getGameAccuracy(username, game) {
+export function getGameAccuracy(username: string, game: IGame): number | undefined {
   if (isUserWhite(username, game)) {
     return game.accuracies?.white
   }
@@ -51,12 +52,6 @@ function getGameAccuracy(username, game) {
     return game.accuracies?.black
   }
 
-  return ''
-}
-
-module.exports = {
-  getOpening,
-  getGameResult,
-  getGameAccuracy
+  return undefined
 }
 
