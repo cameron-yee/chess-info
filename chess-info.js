@@ -1,20 +1,20 @@
 const { argv } = require('node:process')
 
+
 async function fetchGamesByYear(username, year) {
   try {
     let allGames = []
     const currentMonth = new Date().getMonth() + 1
 
     for (let i = 1; i < currentMonth; i++) {
-      let month = i
+      let month = String(i).padStart(2, '0')
 
-      if (i < 10) {
-        month = `0${i}`
-      }
-
-      const resp = await fetch(`https://api.chess.com/pub/player/${username}/games/${year}/${month}`, {
-        method: 'GET'
-      })
+      const resp = await fetch(
+        `https://api.chess.com/pub/player/${username}/games/${year}/${month}`,
+        {
+          method: 'GET'
+        }
+      )
 
       const json = await resp.json()
       const games = json.games
@@ -28,48 +28,77 @@ async function fetchGamesByYear(username, year) {
 }
 
 function getOpening(game) {
-  const openingUrl = game.eco
-  const openingUrlParts = openingUrl.split('/')
-  const opening = openingUrlParts[openingUrlParts.length - 1]
+  const openingUrlMatches = game.pgn.match(/\[ECOUrl "([^"]+)"/)
+  const openingUrl = openingUrlMatches?.[1]
+  const openingUrlParts = openingUrl?.split('/')
+  const opening = openingUrlParts?.[openingUrlParts?.length - 1]
   return opening
 }
 
-function getGameResult(username, game) {
+function isUserWhite(username, game) {
   return game.white.username === username
-    ? game.white.result
-    : game.black.username === username
-      ? game.black.result
-      : ''
+}
+
+function isUserBlack(username, game) {
+  return game.black.username === username
+}
+
+function getGameResult(username, game) {
+  if (isUserWhite(username, game)) {
+    return game.white.result
+  }
+  if (isUserBlack(username, game)) {
+    return game.black.result
+  }
+
+  return ''
+}
+
+function getGameAccuracy(username, game) {
+  if (isUserWhite(username, game)) {
+    return game.accuracies?.white
+  }
+  if (isUserBlack(username, game)) {
+    return game.accuracies?.black
+  }
+
+  return ''
+}
+
+function filterUserGamesByTimeControlAndPieces(username, pieces, timeClass) {
+  return function (game) {
+    if (game.time_class !== timeClass) {
+      return false
+    }
+    if (pieces === 'black') {
+      return isUserBlack(username, game)
+    }
+    if (pieces === 'white') {
+      return isUserWhite(username, game)
+    }
+
+    return false
+  }
+}
+
+function formatGameData(username) {
+  return function mapGame(game) {
+    return {
+      accuracy: getGameAccuracy(username, game),
+      opening: getOpening(game),
+      result: getGameResult(username, game)
+    }
+  }
 }
 
 async function getOpeningsByYear(username, year, pieces, timeClass) {
   try {
     const allGames = await fetchGamesByYear(username, year)
-    const filteredGames =  allGames.filter((game) => {
-        if (game.time_class !== timeClass) {
-          return false
-        }
-        if (pieces === 'black') {
-          return game.black.username === username
-        }
-        if (pieces === 'white') {
-          return game.white.username === username
-        }
+    const filteredGames =  allGames.filter(
+      filterUserGamesByTimeControlAndPieces(username, pieces, timeClass)
+    )
 
-        return false
-      })
-
-    const openings = filteredGames.map((game) => {
-      const opening = getOpening(game)
-      const result = getGameResult(username, game)
-
-      return {
-        opening,
-        result
-      }
-    })
-
-    return openings
+    return filteredGames.map(formatGameData(username))
   } catch (err) {
     console.error(err)
     return []
@@ -83,16 +112,31 @@ function sortOpeningCounts(openingCounts) {
 }
 
 function getOpeningCounts(openings) {
-  return sortOpeningCounts(openings.reduce((acc, { opening, result }) => {
+  return sortOpeningCounts(openings.reduce((acc, { accuracy, opening, result }) => {
     if (acc[opening]) {
       acc[opening].count++
-      acc[opening][result] = acc[opening][result] ? acc[opening][result] + 1 : 1
+
+      if (acc[opening].averageAccuracy && accuracy) {
+        acc[opening].averageAccuracy = (acc[opening].averageAccuracy + accuracy) / 2
+      } else if (accuracy) {
+        acc[opening].averageAccuracy = accuracy
+      }
+
+      acc[opening].results[result] = acc[opening].results[result]
+        ? acc[opening].results[result] + 1
+        : 1
+
       return acc
     }
 
     acc[opening] = {}
     acc[opening].count = 1
-    acc[opening][result] = 1
+
+    if (accuracy) {
+      acc[opening].averageAccuracy = accuracy
+    }
+    acc[opening].results = {}
+    acc[opening].results[result] = 1
     return acc
   }, {}))
 }
@@ -107,7 +151,7 @@ async function main() {
 
   const openings = await getOpeningsByYear(username, year, pieces, timeClass)
   const openingCounts = getOpeningCounts(openings)
-  console.log(openingCounts)
+  console.log(JSON.stringify(openingCounts, null, 2))
 }
 
 main()
