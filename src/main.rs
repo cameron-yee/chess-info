@@ -1,6 +1,5 @@
 use chrono::Datelike;
 use chrono::Local;
-use chrono::SubsecRound;
 use futures::future::join_all;
 use serde::{Deserialize, Serialize};
 use std::clone::Clone;
@@ -8,7 +7,6 @@ use std::collections::HashMap;
 use std::env;
 use std::fmt::Debug;
 use std::option::Option;
-use std::result::Result;
 use std::vec::Vec;
 
 struct Cli {
@@ -25,24 +23,24 @@ struct Entry {
     average_accuracy: Option<f32>,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 struct Accuracies {
     black: f32,
     white: f32,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 struct PieceInfo {
     result: String,
-    username: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 struct Game {
     accuracies: Option<Accuracies>,
     pgn: String,
     black: PieceInfo,
     white: PieceInfo,
+    time_class: String,
 }
 
 #[derive(Deserialize)]
@@ -105,7 +103,7 @@ fn parse_pgn_tags(pgn: &str) -> ParsedPgnTags {
 }
 
 fn merge_results(a: HashMap<String, u32>, b: HashMap<String, u32>) -> HashMap<String, u32> {
-    let mut merged: HashMap<String, u32> = HashMap::new();
+    let mut merged: HashMap<String, u32> = b.clone();
 
     for (a_key, a_value) in a.clone().into_iter() {
         let value_in_b = b.get(&a_key);
@@ -118,7 +116,7 @@ fn merge_results(a: HashMap<String, u32>, b: HashMap<String, u32>) -> HashMap<St
     merged
 }
 
-fn merge_entries(a: Entry, b: Entry) -> Entry {
+fn merge_entries(a: &Entry, b: &Entry) -> Entry {
     { Entry {
         count: a.count + b.count,
         average_accuracy: match (a.average_accuracy, b.average_accuracy) {
@@ -127,7 +125,7 @@ fn merge_entries(a: Entry, b: Entry) -> Entry {
             (None, Some(b_avg)) => Some(b_avg),
             (None, None) => None
         },
-        results: merge_results(a.results, b.results),
+        results: merge_results(a.clone().results, b.clone().results),
     }}
 }
 
@@ -171,20 +169,19 @@ fn get_opening_name<'tags>(tags: &'tags ParsedPgnTags) -> Option<&'tags str> {
     }
 }
 
-#[tokio::main]
-async fn main() {
-    let pieces = env::args().nth(1).expect("The 'pieces' argument is required.");
-    let time_class = env::args().nth(2).expect("The 'time_class' argument is required.");
-    let username = env::args().nth(3).expect("The 'username' argument is required.");
-    let year = env::args().nth(4).expect("The 'year' argument is required.");
-
-    let cli = Cli {
-        pieces,
-        time_class,
-        username,
-        year
+fn get_game_result<'game>(user_pieces: String, game: &'game Game) -> HashMap<String, u32> {
+    let result: String = if user_pieces == "Black" {
+        game.clone().black.result
+    } else {
+        game.clone().white.result
     };
 
+    let mut results: HashMap<String, u32> = HashMap::new();
+    results.insert(result, 1);
+    results
+}
+
+async fn run(cli: &Cli) {
     let now = Local::now();
     let month = now.date_naive().month();
 
@@ -203,6 +200,14 @@ async fn main() {
                         Some(user_pieces) => user_pieces,
                         None => continue,
                     };
+                    if user_pieces.to_lowercase() != cli.pieces.to_lowercase() {
+                        continue;
+                    }
+
+                    let time_class = &game.time_class;
+                    if time_class.to_lowercase() != cli.time_class.to_lowercase() {
+                        continue;
+                    }
 
                     let accuracy: Option<f32> = get_game_accuracy(user_pieces, &game);
 
@@ -211,14 +216,7 @@ async fn main() {
                         None => continue,
                     };
 
-                    let result: String = if user_pieces == "Black" {
-                        game.black.result
-                    } else {
-                        game.white.result
-                    };
-
-                    let mut results: HashMap<String, u32> = HashMap::new();
-                    results.insert(result, 1);
+                    let results: HashMap<String, u32> = get_game_result(user_pieces.to_string(), &game);
 
                     let new_entry: Entry = { Entry {
                         average_accuracy: accuracy,
@@ -227,7 +225,7 @@ async fn main() {
                     }};
 
                     let inserted_entry: Entry = match json.get(opening_name) {
-                        Some(existing_entry) => merge_entries(existing_entry.clone(), new_entry),
+                        Some(existing_entry) => merge_entries(existing_entry, &new_entry),
                         None => new_entry
                     };
 
@@ -247,4 +245,21 @@ async fn main() {
         Ok(str) => println!("{}", str),
         Err(e) => println!("{}", e),
     }
+}
+
+#[tokio::main]
+async fn main() {
+    let pieces = env::args().nth(1).expect("The 'pieces' argument is required.");
+    let time_class = env::args().nth(2).expect("The 'time_class' argument is required.");
+    let username = env::args().nth(3).expect("The 'username' argument is required.");
+    let year = env::args().nth(4).expect("The 'year' argument is required.");
+
+    let cli = Cli {
+        pieces,
+        time_class,
+        username,
+        year
+    };
+
+    run(&cli).await;
 }
