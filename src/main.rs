@@ -57,13 +57,18 @@ struct ResponseJson {
     games: Vec<Game>
 }
 
+type OutputJson = HashMap<String, Entry>;
+
 #[derive(Serialize)]
 struct Output {
-    json: HashMap<String, Entry>
+    json: OutputJson
 }
 
-async fn get_month_games(cli: &Cli, month: u32) -> Option<ResponseJson> {
-    let result = reqwest::Client::new()
+type GameResult = HashMap<String, u32>;
+type ParsedPgnTags<'a> = HashMap<&'a str, String>;
+
+async fn get_month_games(cli: &Cli, client: &reqwest::Client, month: u32) -> Option<ResponseJson> {
+    let result = client
         .get(
             format!(
                 "https://api.chess.com/pub/player/{}/games/{}/{:02}",
@@ -93,8 +98,6 @@ async fn get_month_games(cli: &Cli, month: u32) -> Option<ResponseJson> {
     }
 }
 
-type ParsedPgnTags<'a> = HashMap<&'a str, String>;
-
 fn parse_pgn_tags(pgn: &str) -> ParsedPgnTags {
     let re = regex::RegexBuilder::new(r"^\[([^\]]+)]")
         .multi_line(true)
@@ -111,8 +114,8 @@ fn parse_pgn_tags(pgn: &str) -> ParsedPgnTags {
     tags
 }
 
-fn merge_results(a: HashMap<String, u32>, b: HashMap<String, u32>) -> HashMap<String, u32> {
-    let mut merged: HashMap<String, u32> = b.clone();
+fn merge_results(a: GameResult, b: GameResult) -> GameResult {
+    let mut merged: GameResult = b.clone();
 
     for (a_key, a_value) in a.clone().into_iter() {
         let value_in_b = b.get(&a_key);
@@ -126,7 +129,7 @@ fn merge_results(a: HashMap<String, u32>, b: HashMap<String, u32>) -> HashMap<St
 }
 
 fn merge_entries(a: &Entry, b: &Entry) -> Entry {
-    { Entry {
+    Entry {
         count: a.count + b.count,
         average_accuracy: match (a.average_accuracy, b.average_accuracy) {
             (Some(a_avg), Some(b_avg)) => Some((a_avg + b_avg) / 2.0),
@@ -135,7 +138,7 @@ fn merge_entries(a: &Entry, b: &Entry) -> Entry {
             (None, None) => None
         },
         results: merge_results(a.clone().results, b.clone().results),
-    }}
+    }
 }
 
 fn get_game_accuracy(user_pieces: &str, game: &Game) -> Option<f32> {
@@ -178,11 +181,11 @@ fn get_opening_name<'tags>(tags: &'tags ParsedPgnTags) -> Option<&'tags str> {
     }
 }
 
-fn get_game_result<'game>(user_pieces: String, game: &'game Game) -> HashMap<String, u32> {
+fn get_game_result(user_pieces: String, game: &Game) -> HashMap<String, u32> {
     let result: String = if user_pieces == "Black" {
-        game.clone().black.result
+        game.black.result.to_owned()
     } else {
-        game.clone().white.result
+        game.white.result.to_owned()
     };
 
     let mut results: HashMap<String, u32> = HashMap::new();
@@ -190,64 +193,68 @@ fn get_game_result<'game>(user_pieces: String, game: &'game Game) -> HashMap<Str
     results
 }
 
+fn add_game_to_output(cli: &Cli, json: &mut OutputJson, game: &Game) {
+    let tags: ParsedPgnTags = parse_pgn_tags(&game.pgn);
+
+    let user_pieces = match get_user_pieces(cli, &tags) {
+        Some(user_pieces) => user_pieces,
+        None => return,
+    };
+    if user_pieces.to_lowercase() != cli.pieces.to_lowercase() {
+        return;
+    }
+
+    let time_class = &game.time_class;
+    if time_class.to_lowercase() != cli.time_class.to_lowercase() {
+        return;
+    }
+
+    let accuracy: Option<f32> = get_game_accuracy(user_pieces, game);
+
+    let opening_name = match get_opening_name(&tags) {
+        Some(opening_name) => opening_name,
+        None => return,
+    };
+
+    let results: HashMap<String, u32> = get_game_result(user_pieces.to_string(), game);
+
+    let new_entry = Entry {
+        average_accuracy: accuracy,
+        count: 1,
+        results,
+    };
+
+    let inserted_entry: Entry = match json.get(opening_name) {
+        Some(existing_entry) => merge_entries(existing_entry, &new_entry),
+        None => new_entry
+    };
+
+    json.insert(opening_name.to_string(), inserted_entry);
+}
+
 async fn run(cli: &Cli) {
     let now = Local::now();
     let month = now.date_naive().month();
 
-    let response_futures = (1..month).map(|m| get_month_games(&cli, m));
+    let client = reqwest::Client::new();
+    let response_futures = (1..month).map(|m| get_month_games(cli, &client, m));
     let responses = join_all(response_futures).await;
 
-    let mut json: HashMap<String, Entry> = HashMap::new();
+    let mut json: OutputJson = HashMap::new();
     for response in responses {
         match response {
             None => continue,
             Some(r) => {
                 for game in r.games {
-                    let tags: ParsedPgnTags = parse_pgn_tags(&game.pgn);
-
-                    let user_pieces = match get_user_pieces(cli, &tags) {
-                        Some(user_pieces) => user_pieces,
-                        None => continue,
-                    };
-                    if user_pieces.to_lowercase() != cli.pieces.to_lowercase() {
-                        continue;
-                    }
-
-                    let time_class = &game.time_class;
-                    if time_class.to_lowercase() != cli.time_class.to_lowercase() {
-                        continue;
-                    }
-
-                    let accuracy: Option<f32> = get_game_accuracy(user_pieces, &game);
-
-                    let opening_name = match get_opening_name(&tags) {
-                        Some(opening_name) => opening_name,
-                        None => continue,
-                    };
-
-                    let results: HashMap<String, u32> = get_game_result(user_pieces.to_string(), &game);
-
-                    let new_entry: Entry = { Entry {
-                        average_accuracy: accuracy,
-                        count: 1,
-                        results,
-                    }};
-
-                    let inserted_entry: Entry = match json.get(opening_name) {
-                        Some(existing_entry) => merge_entries(existing_entry, &new_entry),
-                        None => new_entry
-                    };
-
-                    json.insert(opening_name.to_string(), inserted_entry);
+                    add_game_to_output(cli, &mut json, &game);
                 }
-
             },
         }
     }
 
-    let output = { Output {
-        json: json.clone()
-    }};
+    let output = Output {
+        json
+    };
 
     let output_string = serde_json::to_string(&output.json);
     match output_string {
