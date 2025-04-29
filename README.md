@@ -18,3 +18,6 @@
   - total games by opening
   - average accuracy by opening
   - results by opening
+
+## Resources
+- https://stackoverflow.com/questions/51044467/how-can-i-perform-parallel-asynchronous-http-get-requests-with-reqwest
