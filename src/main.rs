@@ -1,18 +1,27 @@
 use chrono::Datelike;
 use chrono::Local;
+use clap::Parser;
 use futures::future::join_all;
 use serde::{Deserialize, Serialize};
 use std::clone::Clone;
 use std::collections::HashMap;
-use std::env;
 use std::fmt::Debug;
 use std::option::Option;
 use std::vec::Vec;
 
+#[derive(Parser, Debug)]
+#[command(version, about, long_about = None)]
 struct Cli {
+    #[arg(short, long, required=true)]
     pieces: String,
+
+    #[arg(short, long, required=true)]
     time_class: String,
+
+    #[arg(short, long, required=true)]
     username: String,
+
+    #[arg(short, long, required=true)]
     year: String,
 }
 
@@ -196,7 +205,7 @@ async fn run(cli: &Cli) {
                 for game in r.games {
                     let tags: ParsedPgnTags = parse_pgn_tags(&game.pgn);
 
-                    let user_pieces = match get_user_pieces(&cli, &tags) {
+                    let user_pieces = match get_user_pieces(cli, &tags) {
                         Some(user_pieces) => user_pieces,
                         None => continue,
                     };
@@ -249,17 +258,6 @@ async fn run(cli: &Cli) {
 
 #[tokio::main]
 async fn main() {
-    let pieces = env::args().nth(1).expect("The 'pieces' argument is required.");
-    let time_class = env::args().nth(2).expect("The 'time_class' argument is required.");
-    let username = env::args().nth(3).expect("The 'username' argument is required.");
-    let year = env::args().nth(4).expect("The 'year' argument is required.");
-
-    let cli = Cli {
-        pieces,
-        time_class,
-        username,
-        year
-    };
-
+    let cli = Cli::parse();
     run(&cli).await;
 }
