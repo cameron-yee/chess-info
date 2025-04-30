@@ -174,7 +174,7 @@ fn get_user_pieces<'cli>(cli: &'cli Cli, tags: &ParsedPgnTags) -> Option<&'cli s
     }
 }
 
-fn get_opening_name<'tags>(tags: &'tags ParsedPgnTags) -> Option<&'tags str> {
+fn get_opening_name(tags: &ParsedPgnTags) -> Option<&str> {
     match tags.get("ECOUrl") {
         Some(eco_url) => {
             let parts: Vec<&str> = eco_url.split('/').collect();
@@ -251,15 +251,26 @@ async fn get_month_games(cli: &Cli, month: u32, year: i32) -> Option<ResponseJso
     if current_year == year && month > current_month {
         return None
     }
-    let client = reqwest::Client::new();
+
+    let client_option = match reqwest::Client::builder().build() {
+       Ok(c) => Some(c),
+       Err(e) => { eprintln!("{}", e); None },
+    };
+
+    let client = match client_option {
+        Some(c) => c,
+        None => return None,
+    };
+
+    let url = format!(
+        "https://api.chess.com/pub/player/{}/games/{}/{:02}",
+        cli.username,
+        year,
+        month
+    );
+
     let result = client
-        .get(
-            format!(
-                "https://api.chess.com/pub/player/{}/games/{}/{:02}",
-                cli.username,
-                year,
-                month
-            ))
+        .get(&url)
         .header(
             "User-Agent",
             "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36"
@@ -268,17 +279,26 @@ async fn get_month_games(cli: &Cli, month: u32, year: i32) -> Option<ResponseJso
         .await;
 
     let response = match result {
-        Ok(response) => response,
-        Err(e) => { println!("{}", e); panic!() },
-    };
-
-    let result = response.json::<ResponseJson>().await;
-    match result {
         Ok(response) => Some(response),
         Err(e) => {
-            println!("{}", e);
+            eprintln!("{}", e);
             None
         },
+    };
+
+    match response {
+        Some(response) => {
+            let status = response.status().to_owned();
+            let result = response.json::<ResponseJson>().await;
+            match result {
+                Ok(response) => Some(response),
+                Err(e) => {
+                    eprintln!("{} ({}):  {}", &url, status, e);
+                    None
+                },
+            }
+        },
+        None => None,
     }
 }
 
@@ -330,7 +350,7 @@ async fn run(cli: &Cli) {
     let output_string = serde_json::to_string(&output.json);
     match output_string {
         Ok(str) => println!("{}", str),
-        Err(e) => println!("{}", e),
+        Err(e) => eprintln!("{}", e),
     }
 }
 
