@@ -331,17 +331,20 @@ async fn get_games(cli: &Cli) -> Vec<Option<ResponseJson>> {
 async fn run(cli: &Cli) {
     let responses = get_games(cli).await;
 
+    let mut game_count = 0;
     let mut json: OutputJson = HashMap::new();
     for response in responses {
         match response {
             None => continue,
             Some(r) => {
+                game_count += r.games.len();
                 for game in r.games {
                     add_game_to_output(cli, &mut json, &game);
                 }
             },
         }
     }
+    eprintln!("Parsed {} Games", game_count);
 
     let output = Output {
         json
