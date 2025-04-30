@@ -243,7 +243,7 @@ fn add_game_to_output(cli: &Cli, json: &mut OutputJson, game: &Game) {
     json.insert(opening_name.to_string(), inserted_entry);
 }
 
-async fn get_month_games(cli: &Cli, month: u32, year: i32) -> Option<ResponseJson> {
+async fn get_month_games(cli: &Cli, client: &reqwest::Client, month: u32, year: i32) -> Option<ResponseJson> {
     let now = Local::now();
     let current_month = now.date_naive().month();
     let current_year = now.date_naive().year();
@@ -251,16 +251,6 @@ async fn get_month_games(cli: &Cli, month: u32, year: i32) -> Option<ResponseJso
     if current_year == year && month > current_month {
         return None
     }
-
-    let client_option = match reqwest::Client::builder().build() {
-       Ok(c) => Some(c),
-       Err(e) => { eprintln!("{}", e); None },
-    };
-
-    let client = match client_option {
-        Some(c) => c,
-        None => return None,
-    };
 
     let url = format!(
         "https://api.chess.com/pub/player/{}/games/{}/{:02}",
@@ -302,7 +292,7 @@ async fn get_month_games(cli: &Cli, month: u32, year: i32) -> Option<ResponseJso
     }
 }
 
-async fn get_games(cli: &Cli) -> Vec<Option<ResponseJson>> {
+async fn get_games(cli: &Cli, client: &reqwest::Client) -> Vec<Option<ResponseJson>> {
     let now = Local::now();
     let year = now.date_naive().year();
 
@@ -321,7 +311,7 @@ async fn get_games(cli: &Cli) -> Vec<Option<ResponseJson>> {
     let mut response_futures: Vec<_> = vec![];
     for y in start_year..end_year {
         for m in start_month..end_month {
-            response_futures.push(get_month_games(cli, m, y));
+            response_futures.push(get_month_games(cli, client, m, y));
         }
     }
 
@@ -329,7 +319,11 @@ async fn get_games(cli: &Cli) -> Vec<Option<ResponseJson>> {
 }
 
 async fn run(cli: &Cli) {
-    let responses = get_games(cli).await;
+    let client = match reqwest::Client::builder().build() {
+        Ok(c) => c,
+        Err(e) => { eprintln!("{}", e); std::process::exit(1); }
+    };
+    let responses = get_games(cli, &client).await;
 
     let mut game_count = 0;
     let mut json: OutputJson = HashMap::new();
