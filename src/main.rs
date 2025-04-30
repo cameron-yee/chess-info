@@ -35,12 +35,45 @@ struct Cli {
 }
 
 #[derive(Clone, Debug, Serialize)]
+#[repr(transparent)]
+struct GameResult {
+    map: HashMap<String, u32>
+}
+
+impl GameResult {
+    fn merge(&mut self, other: Self) {
+        for (key, value) in other.map.into_iter() {
+            *self.map.entry(key.to_string()).or_default() += value;
+        }
+    }
+}
+
+#[derive(Clone, Serialize)]
 struct Entry {
     count: u32,
     eco_url: String,
     eco: String,
-    results: HashMap<String, u32>,
+    results: GameResult,
     average_accuracy: Option<f32>,
+}
+
+impl Entry {
+    fn merge(&mut self, other: Self) {
+        self.count += other.count;
+        if self.eco_url.is_empty() {
+            self.eco_url = other.eco_url;
+        }
+        if self.eco.is_empty() {
+            self.eco = other.eco;
+        }
+        self.results.merge(other.results);
+        match (self.average_accuracy, other.average_accuracy) {
+            (Some(a_avg), Some(b_avg)) => Some((a_avg + b_avg) / 2.0),
+            (Some(a_avg), None) => Some(a_avg),
+            (None, Some(b_avg)) => Some(b_avg),
+            (None, None) => None
+        };
+    }
 }
 
 #[derive(Clone, Deserialize)]
@@ -75,7 +108,6 @@ struct Output {
     json: OutputJson
 }
 
-type GameResult = HashMap<String, u32>;
 type ParsedPgnTags = HashMap<String, String>;
 
 fn parse_pgn_tags(pgn: String) -> ParsedPgnTags {
@@ -110,35 +142,6 @@ fn parse_pgn_tags(pgn: String) -> ParsedPgnTags {
     }
 
     tags
-}
-
-fn merge_results(a: GameResult, b: GameResult) -> GameResult {
-    let mut merged: GameResult = b.clone();
-
-    for (a_key, a_value) in a.clone().into_iter() {
-        let value_in_b = b.get(&a_key);
-        merged.insert(a_key, match value_in_b {
-            Some(v) => v + a_value,
-            None => a_value
-        });
-    }
-
-    merged
-}
-
-fn merge_entries(a: &Entry, b: &Entry) -> Entry {
-    Entry {
-        count: a.count + b.count,
-        average_accuracy: match (a.average_accuracy, b.average_accuracy) {
-            (Some(a_avg), Some(b_avg)) => Some((a_avg + b_avg) / 2.0),
-            (Some(a_avg), None) => Some(a_avg),
-            (None, Some(b_avg)) => Some(b_avg),
-            (None, None) => None
-        },
-        eco_url: a.eco_url.clone(),
-        eco: a.eco.clone(),
-        results: merge_results(a.clone().results, b.clone().results),
-    }
 }
 
 fn get_game_accuracy(user_pieces: &str, game: &Game) -> Option<f32> {
@@ -184,15 +187,15 @@ fn get_opening_name(tags: &ParsedPgnTags) -> Option<&str> {
     }
 }
 
-fn get_game_result(user_pieces: String, game: &Game) -> HashMap<String, u32> {
+fn get_game_result(user_pieces: String, game: &Game) -> GameResult {
     let result: String = if user_pieces == "Black" {
         game.black.result.to_owned()
     } else {
         game.white.result.to_owned()
     };
 
-    let mut results: HashMap<String, u32> = HashMap::new();
-    results.insert(result, 1);
+    let mut results = GameResult { map: HashMap::new() };
+    results.map.insert(result, 1);
     results
 }
 
@@ -219,9 +222,9 @@ fn add_game_to_output(cli: &Cli, json: &mut OutputJson, game: &Game) {
         None => return,
     };
 
-    let results: HashMap<String, u32> = get_game_result(user_pieces.to_string(), game);
+    let results: GameResult = get_game_result(user_pieces.to_string(), game);
 
-    let new_entry = Entry {
+    let mut new_entry = Entry {
         average_accuracy: accuracy,
         count: 1,
         eco: match tags.get("ECO") {
@@ -235,12 +238,11 @@ fn add_game_to_output(cli: &Cli, json: &mut OutputJson, game: &Game) {
         results,
     };
 
-    let inserted_entry: Entry = match json.get(opening_name) {
-        Some(existing_entry) => merge_entries(existing_entry, &new_entry),
-        None => new_entry
-    };
+    if let Some(existing_entry) = json.get(opening_name) {
+        new_entry.merge(existing_entry.clone())
+    }
 
-    json.insert(opening_name.to_string(), inserted_entry);
+    json.insert(opening_name.to_string(), new_entry);
 }
 
 async fn get_month_games(cli: &Cli, client: &reqwest::Client, month: u32, year: i32) -> Option<ResponseJson> {
