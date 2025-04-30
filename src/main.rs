@@ -76,19 +76,37 @@ struct Output {
 }
 
 type GameResult = HashMap<String, u32>;
-type ParsedPgnTags<'a> = HashMap<&'a str, String>;
+type ParsedPgnTags = HashMap<String, String>;
 
-fn parse_pgn_tags(pgn: &str) -> ParsedPgnTags {
-    let re = regex::RegexBuilder::new(r"^\[([^\]]+)]")
-        .multi_line(true)
-        .build()
-        .unwrap();
+fn parse_pgn_tags(pgn: String) -> ParsedPgnTags {
+    let mut tags: HashMap<String, String> = HashMap::new();
 
-    let mut tags: HashMap<&str, String> = HashMap::new();
-    for (_full, [m]) in re.captures_iter(pgn).map(|c| c.extract()) {
-        let tag: Vec<&str> = m.split(' ').collect();
-        let v = tag[1].replace("\"", "");
-        tags.insert(tag[0], v);
+    for line in pgn.lines() {
+        let mut key: String = String::from("");
+        let mut value: String = String::from("");
+        let mut on_key = true;
+
+        for (i, c) in line.chars().enumerate() {
+            if i == 0 && c != '[' {
+                break;
+            }
+            if c == '"' || c == '[' || c == ']' {
+                continue;
+            }
+            if on_key && c == ' ' {
+                on_key = false;
+                continue;
+            }
+            if on_key {
+                key.push(c);
+                continue;
+            }
+            value.push(c);
+        }
+
+        if !key.is_empty() && !value.is_empty() {
+            tags.insert(key, value);
+        }
     }
 
     tags
@@ -179,7 +197,7 @@ fn get_game_result(user_pieces: String, game: &Game) -> HashMap<String, u32> {
 }
 
 fn add_game_to_output(cli: &Cli, json: &mut OutputJson, game: &Game) {
-    let tags: ParsedPgnTags = parse_pgn_tags(&game.pgn);
+    let tags: ParsedPgnTags = parse_pgn_tags(game.pgn.clone());
 
     let user_pieces = match get_user_pieces(cli, &tags) {
         Some(user_pieces) => user_pieces,
