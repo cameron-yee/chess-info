@@ -1,7 +1,10 @@
 use chrono::Datelike;
 use chrono::Local;
-use clap::Parser;
+use clap::Parser as ClapParser;
 use futures::future::join_all;
+use pest_derive::Parser as DeriveParser;
+use pest::error::Error;
+use pest::Parser as PestParser;
 use serde::{Deserialize, Serialize};
 use std::clone::Clone;
 use std::collections::HashMap;
@@ -10,7 +13,7 @@ use std::option::Option;
 use std::str::FromStr;
 use std::vec::Vec;
 
-#[derive(Parser, Debug)]
+#[derive(ClapParser, Debug)]
 #[command(version, about, long_about = None)]
 struct Cli {
     #[arg(short, long, required=true)]
@@ -109,6 +112,10 @@ struct Output {
     json: OutputJson
 }
 
+#[derive(DeriveParser)]
+#[grammar="tags.pest"]
+struct ParsedPgnTagParser;
+
 struct ParsedPgnTags {
     black: String,
     white: String,
@@ -116,52 +123,49 @@ struct ParsedPgnTags {
     eco_url: String,
 }
 
-struct ParsedPgnTagsError {
-    message: String
-}
-
 impl FromStr for ParsedPgnTags {
-    type Err = ParsedPgnTagsError;
+    type Err = Error<Rule>;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let error_message: String = String::from("Could not parse tags");
-        let err = ParsedPgnTagsError { message: error_message };
+        let mut black: String = String::default();
+        let mut white: String = String::default();
+        let mut eco: String = String::default();
+        let mut eco_url: String = String::default();
 
-        fn get_match(s: &str, key: &str) -> Option<String> {
-            match s.find(&format!("{} ", key)) {
-                Some(m) => {
-                    let start_index = m + key.len() + 2; // ' "'
-                    for (i, c) in s[start_index..].chars().enumerate() {
-                       if c != ']' {
-                           continue;
-                       }
+        match ParsedPgnTagParser::parse(Rule::tags, s) {
+            Ok(mut p) => {
+                let t = p.next().unwrap();
+                for tag in t.into_inner() {
+                    match tag.as_rule() {
+                        Rule::tag => {
+                            let mut inner = tag.into_inner();
+                            let key = inner
+                                .next()
+                                .unwrap()
+                                .as_str();
+                            let value = inner
+                                .next()
+                                .unwrap()
+                                .as_str();
 
-                       let end_index = start_index + i - 1; // ignore end quote
-                       let value = s[start_index..end_index].to_owned();
-                       return Some(value);
-                    }
-
-                    None
-                },
-                None => None,
-            }
-       }
-
-       let black: String = match get_match(s, "Black") {
-           Some(m) => m,
-           None => return Err(err),
-       };
-       let white: String = match get_match(s, "White") {
-           Some(m) => m,
-           None => return Err(err),
-       };
-       let eco: String = match get_match(s, "ECO") {
-           Some(m) => m,
-           None => return Err(err),
-       };
-       let eco_url: String = match get_match(s, "ECOUrl") {
-           Some(m) => m,
-           None => return Err(err)
+                            match key {
+                                "Black" => black = value.to_owned(),
+                                "White" => white = value.to_owned(),
+                                "Eco" => eco = value.to_owned(),
+                                "ECOUrl" => eco_url = value.to_owned(),
+                                _ => (),
+                            }
+                        },
+                        Rule::bracket
+                        | Rule::WHITESPACE
+                        | Rule::quote
+                        | Rule::key
+                        | Rule::value
+                        | Rule::tags => (),
+                    };
+                }
+            },
+            Err(e) => return Err(e),
        };
 
        Ok(ParsedPgnTags { black, white, eco, eco_url })
@@ -218,7 +222,7 @@ fn get_game_result(user_pieces: String, game: &Game) -> GameResult {
 fn add_game_to_output(cli: &Cli, json: &mut OutputJson, game: &Game) {
     let tags: ParsedPgnTags = match game.pgn.parse::<ParsedPgnTags>() {
         Ok(tags) => tags,
-        Err(e) => { eprintln!("{}", e.message); return }
+        Err(e) => { eprintln!("{}", e); return }
     };
 
     let user_pieces = match get_user_pieces(cli, &tags) {

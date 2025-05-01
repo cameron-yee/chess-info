@@ -1,0 +1,8 @@
+bracket = _{ "[" | "]" }
+WHITESPACE = _{ " " | "\n" }
+key = @{ ASCII_ALPHANUMERIC+ }
+quote = _{ "\"" }
+value = { (ASCII_ALPHANUMERIC | "." | "-" | "/" | ":" | "!" | "'")+ }
+
+tag = { (bracket ~ key ~ quote ~ value ~ quote ~ bracket) }
+tags = { tag+ }
