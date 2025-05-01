@@ -7,6 +7,7 @@ use std::clone::Clone;
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::option::Option;
+use std::str::FromStr;
 use std::vec::Vec;
 
 #[derive(Parser, Debug)]
@@ -108,40 +109,63 @@ struct Output {
     json: OutputJson
 }
 
-type ParsedPgnTags = HashMap<String, String>;
+struct ParsedPgnTags {
+    black: String,
+    white: String,
+    eco: String,
+    eco_url: String,
+}
 
-fn parse_pgn_tags(pgn: String) -> ParsedPgnTags {
-    let mut tags: HashMap<String, String> = HashMap::new();
+struct ParsedPgnTagsError {
+    message: String
+}
 
-    for line in pgn.lines() {
-        let mut key: String = String::from("");
-        let mut value: String = String::from("");
-        let mut on_key = true;
+impl FromStr for ParsedPgnTags {
+    type Err = ParsedPgnTagsError;
 
-        for (i, c) in line.chars().enumerate() {
-            if i == 0 && c != '[' {
-                break;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let error_message: String = String::from("Could not parse tags");
+        let err = ParsedPgnTagsError { message: error_message };
+
+        fn get_match(s: &str, key: &str) -> Option<String> {
+            match s.find(&format!("{} ", key)) {
+                Some(m) => {
+                    let start_index = m + key.len() + 2; // ' "'
+                    for (i, c) in s[start_index..].chars().enumerate() {
+                       if c != ']' {
+                           continue;
+                       }
+
+                       let end_index = start_index + i - 1; // ignore end quote
+                       let value = s[start_index..end_index].to_owned();
+                       return Some(value);
+                    }
+
+                    None
+                },
+                None => None,
             }
-            if c == '"' || c == '[' || c == ']' {
-                continue;
-            }
-            if on_key && c == ' ' {
-                on_key = false;
-                continue;
-            }
-            if on_key {
-                key.push(c);
-                continue;
-            }
-            value.push(c);
-        }
+       }
 
-        if !key.is_empty() && !value.is_empty() {
-            tags.insert(key, value);
-        }
-    }
+       let black: String = match get_match(s, "Black") {
+           Some(m) => m,
+           None => return Err(err),
+       };
+       let white: String = match get_match(s, "White") {
+           Some(m) => m,
+           None => return Err(err),
+       };
+       let eco: String = match get_match(s, "ECO") {
+           Some(m) => m,
+           None => return Err(err),
+       };
+       let eco_url: String = match get_match(s, "ECOUrl") {
+           Some(m) => m,
+           None => return Err(err)
+       };
 
-    tags
+       Ok(ParsedPgnTags { black, white, eco, eco_url })
+   }
 }
 
 fn get_game_accuracy(user_pieces: &str, game: &Game) -> Option<f32> {
@@ -158,33 +182,25 @@ fn get_game_accuracy(user_pieces: &str, game: &Game) -> Option<f32> {
 }
 
 fn get_user_pieces<'cli>(cli: &'cli Cli, tags: &ParsedPgnTags) -> Option<&'cli str> {
-    let black = tags.get("Black");
-    let white = tags.get("White");
+    let black = tags.black.to_owned();
+    let white = tags.white.to_owned();
 
-    match black {
-        Some(username)
-            if *username.to_lowercase() == cli.username.to_lowercase()
-                => return Some("Black"),
-        Some(_) => (),
-        None => (),
-    };
-
-    match white {
-        Some(username) if *username.to_lowercase() == cli.username.to_lowercase()
-            => Some("White"),
-        Some(_) => None,
-        None => None,
+    if black.to_lowercase() == cli.username.to_lowercase() {
+        return Some("Black");
     }
+
+    if white.to_lowercase() == cli.username.to_lowercase() {
+        return Some("White");
+    }
+
+    None
 }
 
 fn get_opening_name(tags: &ParsedPgnTags) -> Option<&str> {
-    match tags.get("ECOUrl") {
-        Some(eco_url) => {
-            let parts: Vec<&str> = eco_url.split('/').collect();
-            Some(parts[parts.len() - 1])
-        },
-        None => None
-    }
+    let eco_url: &String = &tags.eco_url;
+    let parts: Vec<&str> = eco_url.split('/').collect();
+    let name = parts[parts.len() - 1];
+    Some(name)
 }
 
 fn get_game_result(user_pieces: String, game: &Game) -> GameResult {
@@ -200,7 +216,10 @@ fn get_game_result(user_pieces: String, game: &Game) -> GameResult {
 }
 
 fn add_game_to_output(cli: &Cli, json: &mut OutputJson, game: &Game) {
-    let tags: ParsedPgnTags = parse_pgn_tags(game.pgn.clone());
+    let tags: ParsedPgnTags = match game.pgn.parse::<ParsedPgnTags>() {
+        Ok(tags) => tags,
+        Err(e) => { eprintln!("{}", e.message); return }
+    };
 
     let user_pieces = match get_user_pieces(cli, &tags) {
         Some(user_pieces) => user_pieces,
@@ -227,14 +246,8 @@ fn add_game_to_output(cli: &Cli, json: &mut OutputJson, game: &Game) {
     let mut new_entry = Entry {
         average_accuracy: accuracy,
         count: 1,
-        eco: match tags.get("ECO") {
-            Some(t) => t.to_owned(),
-            None => String::from("")
-        },
-        eco_url: match tags.get("ECOUrl") {
-            Some(t) => t.to_owned(),
-            None => String::from("")
-        },
+        eco: tags.eco.to_owned(),
+        eco_url: tags.eco_url.to_owned(),
         results,
     };
 
