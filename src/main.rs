@@ -41,8 +41,8 @@ struct GameResult {
 }
 
 impl GameResult {
-    fn merge(&mut self, other: Self) {
-        for (key, value) in other.map.into_iter() {
+    fn merge(&mut self, other: &Self) {
+        for (key, value) in other.map.iter() {
             *self.map.entry(key.to_string()).or_default() += value;
         }
     }
@@ -58,15 +58,15 @@ struct Entry {
 }
 
 impl Entry {
-    fn merge(&mut self, other: Self) {
+    fn merge(&mut self, other: &Self) {
         self.count += other.count;
         if self.eco_url.is_empty() {
-            self.eco_url = other.eco_url;
+            self.eco_url = other.eco_url.to_owned();
         }
         if self.eco.is_empty() {
-            self.eco = other.eco;
+            self.eco = other.eco.to_owned();
         }
-        self.results.merge(other.results);
+        self.results.merge(&other.results);
         match (self.average_accuracy, other.average_accuracy) {
             (Some(a_avg), Some(b_avg)) => Some((a_avg + b_avg) / 2.0),
             (Some(a_avg), None) => Some(a_avg),
@@ -239,7 +239,7 @@ fn add_game_to_output(cli: &Cli, json: &mut OutputJson, game: &Game) {
     };
 
     if let Some(existing_entry) = json.get(opening_name) {
-        new_entry.merge(existing_entry.clone())
+        new_entry.merge(existing_entry)
     }
 
     json.insert(opening_name.to_string(), new_entry);
