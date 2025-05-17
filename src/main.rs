@@ -36,6 +36,9 @@ struct Cli {
 
     #[arg(long, default_value=None)]
     end_year: Option<i32>,
+
+    #[arg(short, long, default_value=None)]
+    best_opening: bool,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -106,11 +109,6 @@ struct ResponseJson {
 }
 
 type OutputJson = HashMap<String, Entry>;
-
-#[derive(Serialize)]
-struct Output {
-    json: OutputJson
-}
 
 #[derive(DeriveParser)]
 #[grammar="tags.pest"]
@@ -230,12 +228,12 @@ fn add_game_to_output(cli: &Cli, json: &mut OutputJson, game: &Game) {
         None => return,
     };
     if user_pieces.to_lowercase() != cli.pieces.to_lowercase() {
-        return;
+        return
     }
 
     let time_class = &game.time_class;
     if time_class.to_lowercase() != cli.time_class.to_lowercase() {
-        return;
+        return
     }
 
     let accuracy: Option<f32> = get_game_accuracy(user_pieces, game);
@@ -244,6 +242,10 @@ fn add_game_to_output(cli: &Cli, json: &mut OutputJson, game: &Game) {
         Some(opening_name) => opening_name,
         None => return,
     };
+
+    if opening_name.is_empty() {
+        return
+    }
 
     let results: GameResult = get_game_result(user_pieces.to_string(), game);
 
@@ -359,11 +361,35 @@ async fn run(cli: &Cli) {
     }
     eprintln!("Parsed {} Games", game_count);
 
-    let output = Output {
-        json
-    };
+    if cli.best_opening {
+        let mut best_openings: HashMap<String, Entry> = HashMap::new();
+        let mut best_opening_count: &u32 = &0;
 
-    let output_string = serde_json::to_string(&output.json);
+        for (opening, entry) in json.iter() {
+            let wins = entry.results.map.get("win");
+            match wins {
+                Some(wins) => {
+                    if wins > best_opening_count {
+                        best_openings.drain();
+                    }
+                    if wins >= best_opening_count {
+                        best_opening_count = wins;
+                        best_openings.insert(opening.to_owned(), entry.to_owned());
+                    }
+                },
+                None => continue
+            };
+        }
+
+        let output_string = serde_json::to_string(&best_openings);
+        match output_string {
+            Ok(str) => println!("{}", str),
+            Err(e) => eprintln!("{}", e),
+        }
+        return
+    }
+
+    let output_string = serde_json::to_string(&json);
     match output_string {
         Ok(str) => println!("{}", str),
         Err(e) => eprintln!("{}", e),
