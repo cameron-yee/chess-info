@@ -6,6 +6,7 @@ use pest_derive::Parser as DeriveParser;
 use pest::error::Error;
 use pest::Parser as PestParser;
 use serde::{Deserialize, Serialize};
+use serde_json::Error as SerdeJsonError;
 use std::clone::Clone;
 use std::collections::HashMap;
 use std::fmt::Debug;
@@ -339,6 +340,33 @@ async fn get_games(cli: &Cli, client: &reqwest::Client) -> Vec<Option<ResponseJs
     join_all(response_futures).await
 }
 
+fn filter_output(cli: &Cli, json: &mut OutputJson) -> Result<String, SerdeJsonError> {
+    if cli.best_opening {
+        let mut best_openings: HashMap<String, Entry> = HashMap::new();
+        let mut best_opening_count: &u32 = &0;
+
+        for (opening, entry) in json.iter() {
+            let wins = entry.results.map.get("win");
+            match wins {
+                Some(wins) => {
+                    if wins > best_opening_count {
+                        best_openings.drain();
+                    }
+                    if wins >= best_opening_count {
+                        best_opening_count = wins;
+                        best_openings.insert(opening.to_owned(), entry.to_owned());
+                    }
+                },
+                None => continue
+            };
+        }
+
+        return serde_json::to_string(&best_openings);
+    }
+
+    serde_json::to_string(json)
+}
+
 async fn run(cli: &Cli) {
     let client = match reqwest::Client::builder().build() {
         Ok(c) => c,
@@ -361,35 +389,7 @@ async fn run(cli: &Cli) {
     }
     eprintln!("Parsed {} Games", game_count);
 
-    if cli.best_opening {
-        let mut best_openings: HashMap<String, Entry> = HashMap::new();
-        let mut best_opening_count: &u32 = &0;
-
-        for (opening, entry) in json.iter() {
-            let wins = entry.results.map.get("win");
-            match wins {
-                Some(wins) => {
-                    if wins > best_opening_count {
-                        best_openings.drain();
-                    }
-                    if wins >= best_opening_count {
-                        best_opening_count = wins;
-                        best_openings.insert(opening.to_owned(), entry.to_owned());
-                    }
-                },
-                None => continue
-            };
-        }
-
-        let output_string = serde_json::to_string(&best_openings);
-        match output_string {
-            Ok(str) => println!("{}", str),
-            Err(e) => eprintln!("{}", e),
-        }
-        return
-    }
-
-    let output_string = serde_json::to_string(&json);
+	let output_string = filter_output(cli, &mut json);
     match output_string {
         Ok(str) => println!("{}", str),
         Err(e) => eprintln!("{}", e),
