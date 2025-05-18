@@ -342,7 +342,7 @@ async fn get_games(cli: &Cli, client: &reqwest::Client) -> Vec<Option<ResponseJs
 
 fn filter_output(cli: &Cli, json: &mut OutputJson) -> Result<String, SerdeJsonError> {
     if cli.best_opening {
-        let mut best_openings: HashMap<String, Entry> = HashMap::new();
+        let mut best_openings: HashMap<&String, &Entry> = HashMap::new();
         let mut best_opening_count: &u32 = &0;
 
         for (opening, entry) in json.iter() {
@@ -354,7 +354,7 @@ fn filter_output(cli: &Cli, json: &mut OutputJson) -> Result<String, SerdeJsonEr
                     }
                     if wins >= best_opening_count {
                         best_opening_count = wins;
-                        best_openings.insert(opening.to_owned(), entry.to_owned());
+                        best_openings.insert(opening, entry);
                     }
                 },
                 None => continue
