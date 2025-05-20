@@ -1,3 +1,12 @@
+# Chess Info
+
+## Running
+
+```sh
+cargo build --release
+./target/release/chess-info --pieces black --username cameron-yee --start-year 2025 --start-month 1 --end-month 2 --time-class blitz``
+```
+
 ## Data Flow
 
 1. Take options from input (CLI)
@@ -21,3 +30,9 @@
 
 ## Resources
 - https://stackoverflow.com/questions/51044467/how-can-i-perform-parallel-asynchronous-http-get-requests-with-reqwest
+
+## Profiling
+
+```sh
+CARGO_PROFILE_RELEASE_DEBUG=true sudo flamegraph -- ./target/release/chess-info --pieces black --username hikaru --start-year 2020 --time-class blitz
+```
