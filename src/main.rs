@@ -17,8 +17,8 @@ use std::vec::Vec;
 #[derive(ClapParser, Debug)]
 #[command(version, about, long_about = None)]
 struct Cli {
-    #[arg(short, long)]
-    pieces: String,
+    #[arg(short, long, default_value=None)]
+    pieces: Option<String>,
 
     #[arg(short, long, required=true)]
     time_class: String,
@@ -228,9 +228,14 @@ fn add_game_to_output(cli: &Cli, json: &mut OutputJson, game: &Game) {
         Some(user_pieces) => user_pieces,
         None => return,
     };
-    if user_pieces.to_lowercase() != cli.pieces.to_lowercase() {
-        return
-    }
+    match &cli.pieces {
+        Some(pieces) => {
+            if user_pieces.to_lowercase() != pieces.to_lowercase() {
+                return
+            }
+        },
+        None => ()
+    };
 
     let time_class = &game.time_class;
     if time_class.to_lowercase() != cli.time_class.to_lowercase() {
