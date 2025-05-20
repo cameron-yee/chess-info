@@ -17,7 +17,7 @@ use std::vec::Vec;
 #[derive(ClapParser, Debug)]
 #[command(version, about, long_about = None)]
 struct Cli {
-    #[arg(short, long, required=true)]
+    #[arg(short, long)]
     pieces: String,
 
     #[arg(short, long, required=true)]
@@ -206,7 +206,7 @@ fn get_opening_name(tags: &ParsedPgnTags) -> Option<&str> {
     Some(name)
 }
 
-fn get_game_result(user_pieces: String, game: &Game) -> GameResult {
+fn get_game_result(user_pieces: &str, game: &Game) -> GameResult {
     let result: String = if user_pieces == "Black" {
         game.black.result.to_owned()
     } else {
@@ -248,7 +248,7 @@ fn add_game_to_output(cli: &Cli, json: &mut OutputJson, game: &Game) {
         return
     }
 
-    let results: GameResult = get_game_result(user_pieces.to_string(), game);
+    let results: GameResult = get_game_result(user_pieces, game);
 
     let mut new_entry = Entry {
         average_accuracy: accuracy,
