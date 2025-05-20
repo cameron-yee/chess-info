@@ -150,7 +150,7 @@ impl FromStr for ParsedPgnTags {
                             match key {
                                 "Black" => black = value.to_owned(),
                                 "White" => white = value.to_owned(),
-                                "Eco" => eco = value.to_owned(),
+                                "ECO" => eco = value.to_owned(),
                                 "ECOUrl" => eco_url = value.to_owned(),
                                 _ => (),
                             }
